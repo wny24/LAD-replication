@@ -1,0 +1,20 @@
+[build-system]
+requires = [
+  "flit_core >=2",
+  "numpy>=1.18.0",
+  "tqdm>=4.50.2",
+]
+build-backend = "flit_core.buildapi"
+
+[project]
+name =  "robot_clip"
+authors = [
+    {name = "Erik Bauer", email = "erbauer@ethz.ch"},
+]
+description = "A CLIP-style contrastive learning model for robot action data"
+# readme = "README.md"
+version = "0.1.0"
+
+
+[tool.flit.module]
+name = "robot_clip"

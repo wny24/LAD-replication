@@ -1,0 +1,8 @@
+*.pth
+*.pyc
+*.log
+__pycache__/
+wandb/
+checkpoints/
+outputs/
+.hydra/
