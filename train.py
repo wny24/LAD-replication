@@ -8,13 +8,19 @@ from tqdm import tqdm
 from robot_clip.model import RobotCLIP
 import os
 
-def load_data(config: DictConfig):
+def load_and_normalize_data(config: DictConfig):
     data = np.load(config.data.source_file, allow_pickle=True).item()
-    return {
-        "mano": torch.tensor(data["local_representation"], dtype=torch.float32),
-        "faive": torch.tensor(data["faive_angles"], dtype=torch.float32),
-        "simple_gripper": torch.tensor(data["simple_gripper"], dtype=torch.float32),
-    }
+    normalized_data = {}
+    normalization_params = {}
+
+    for modality, tensor in data.items():
+        mean = np.mean(tensor, axis=0)
+        std = np.std(tensor, axis=0)
+        normalized_tensor = (tensor - mean) / (std + 1e-8)  # Add small epsilon to avoid division by zero
+        normalized_data[modality] = torch.tensor(normalized_tensor, dtype=torch.float32)
+        normalization_params[modality] = {'mean': mean, 'std': std}
+
+    return normalized_data, normalization_params
 
 def create_optimizer(config: DictConfig, model_params):
     optimizer_name = config.optimizer.name
@@ -82,7 +88,7 @@ def evaluate(model, test_loader, config, device):
 
     return epoch_losses
 
-def save_model(model, optimizer, epoch, config, run_name):
+def save_model(model, optimizer, epoch, config, run_name, normalization_params):
     # Use only the wandb run name for the directory
     save_dir = os.path.join(config.training.save_path, run_name)
     print(f"Saving model to {save_dir}")
@@ -91,7 +97,8 @@ def save_model(model, optimizer, epoch, config, run_name):
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'config': config
+        'config': OmegaConf.to_container(config, resolve=True),
+        'normalization_params': normalization_params
     }
     torch.save(checkpoint, os.path.join(save_dir, f'model_epoch_{epoch}.pth'))
 
@@ -108,10 +115,10 @@ def train(config: DictConfig):
                 mode="disabled" if debug_mode else None,
                 dir=config.training.save_path)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{config.training.gpu_id}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    data = load_data(config)
+    data, normalization_params = load_and_normalize_data(config)
     
     # Create a TensorDataset
     dataset = TensorDataset(*[tensor for tensor in data.values()])
@@ -144,7 +151,7 @@ def train(config: DictConfig):
 
         # Save model checkpoint
         if (epoch + 1) % config.training.save_interval == 0:
-            save_model(model, optimizer, epoch + 1, config, wandb.run.name) 
+            save_model(model, optimizer, epoch + 1, config, wandb.run.name, normalization_params)
 
     if not debug_mode:
         wandb.finish()

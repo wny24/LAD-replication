@@ -1,13 +1,13 @@
 modalities:
   mano:
     input_dim: 189
-    encoder_hidden_dims: [256, 256]
-    decoder_hidden_dims: [256, 256]
+    encoder_hidden_dims: [64]
+    decoder_hidden_dims: [64]
   faive:
     input_dim: 11
-    encoder_hidden_dims: [64, 64]
-    decoder_hidden_dims: [64, 64]
+    encoder_hidden_dims: [16]
+    decoder_hidden_dims: [16]
   simple_gripper:
     input_dim: 1
-    encoder_hidden_dims: [16, 16]
-    decoder_hidden_dims: [16, 16]
+    encoder_hidden_dims: [4]
+    decoder_hidden_dims: [4]

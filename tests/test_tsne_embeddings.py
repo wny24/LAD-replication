@@ -1,24 +1,26 @@
 import hydra
-import os
 from omegaconf import DictConfig
 import torch
 import numpy as np
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
-from robot_clip.model import RobotCLIP
-from train import load_data
+from robot_clip.utils import load_model_and_config
+from train import load_and_normalize_data
 
 @hydra.main(config_path="../config", config_name="config")
 def visualize_tsne(config: DictConfig):
-    # Load the data
-    data = load_data(config)
+    # Load and normalize the data
+    data, _ = load_and_normalize_data(config)
     
-    # Load the trained model
+    # Load the trained model, its config, and normalization parameters
+    model, loaded_config, _ = load_model_and_config(
+        config.training.save_path,
+        config.wandb.run_name,
+        config.training.num_epochs
+    )
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = RobotCLIP(config).to(device)
-    model_path = os.path.abspath(f"{config.training.save_path}/model_epoch_{config.training.num_epochs}.pth")
-    checkpoint = torch.load(model_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    model = model.to(device)
     model.eval()
 
     # Select a random subset of data
@@ -47,7 +49,9 @@ def visualize_tsne(config: DictConfig):
 
     plt.legend()
     plt.title("t-SNE visualization of embeddings")
-    plt.savefig("tsne_embeddings.png")
+
+    print(f'Saving at {config.training.save_path}')
+    plt.savefig(f"{config.training.save_path}/tsne_embeddings.png")
     plt.close()
 
 if __name__ == "__main__":
