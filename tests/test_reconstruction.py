@@ -4,69 +4,63 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from robot_clip.utils import load_model_and_config
-from train import load_and_normalize_data
+from robot_clip.data_loading import get_dataloaders, normalize_data, denormalize_data
+from tests.utils import load_test_data, display_test_sequence
 import os
+from hydra.utils import to_absolute_path
 
-@hydra.main(config_path="../config", config_name="config")
+@hydra.main(config_path="../config", config_name="two_step_config")
 def test_reconstruction(config: DictConfig):
-    # Load and normalize the data
-    data, _ = load_and_normalize_data(config)
+    # Load the training data (for normalization parameters)
+    _, _, train_normalization_params = get_dataloaders(config)
     
-    # Load the trained model, its config, and normalization parameters
-    model, loaded_config, normalization_params = load_model_and_config(
-        config.training.save_path,
+    # Load and display the test data
+    test_data, test_normalization_params = load_test_data(config)
+    save_path = to_absolute_path(os.path.join("tests", "outputs", config.wandb.run_name))
+    display_test_sequence(test_data, test_normalization_params, save_path)
+    
+    # Load the trained model and its config
+    model, loaded_config, _ = load_model_and_config(
+        to_absolute_path(config.training.save_path),
         config.wandb.run_name,
-        config.training.num_epochs
+        config.training.encoder_epochs + config.training.decoder_epochs
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
 
-    # Select a random sample
-    modalities = list(data.keys())
-
-    data_keys_to_batch_names = {
-        'mano': 'local_representation',
-        'faive': 'faive_angles'
-    }
-    
-    index = np.random.randint(len(data['faive_angles']))
-    input_data = {modality: data[modality][index:index+50].to(device) for modality in data.keys()}
-    
-    for key, batch_name in data_keys_to_batch_names.items():
-        input_data[key] = input_data[batch_name] 
-        del input_data[batch_name]
+    # Convert test data to tensors and move to device
+    input_data = {k: torch.tensor(v, dtype=torch.float32).to(device) for k, v in test_data.items()}
 
     with torch.no_grad():
         _, reconstructions = model(input_data)
 
     # Visualize reconstructions
-    for modality_name, modality_batch_name in data_keys_to_batch_names.items():
-        original = input_data[modality_name].cpu().numpy().squeeze()
-        reconstructed = reconstructions[modality_name].cpu().numpy().squeeze()
+    for modality in input_data.keys():
+        original = input_data[modality].cpu().numpy()
+        reconstructed = reconstructions[modality].cpu().numpy()
 
-        # Denormalize the data
-        mean = normalization_params[modality_batch_name]['mean']
-        std = normalization_params[modality_batch_name]['std']
-        original = original * std + mean
-        reconstructed = reconstructed * std + mean
+        # Denormalize the data using training normalization parameters
+        original = denormalize_data({modality: original}, {modality: train_normalization_params[modality]})[modality]
+        reconstructed = denormalize_data({modality: reconstructed}, {modality: train_normalization_params[modality]})[modality]
 
-        num_dims = min(15, len(original))
-        fig, axes = plt.subplots(num_dims, 1, figsize=(10, 3*num_dims))
-        fig.suptitle(f"{modality_name} Reconstruction")
+        num_dims = min(15, original.shape[1])
+        fig, axes = plt.subplots(num_dims, 1, figsize=(15, 3*num_dims))
+        fig.suptitle(f"{modality} Reconstruction")
 
         for i in range(num_dims):
             ax = axes[i] if num_dims > 1 else axes
-            ax.plot(original[i], label='Original', color='blue')
-            ax.plot(reconstructed[i], label='Reconstructed', color='red', linestyle='--')
+            ax.plot(original[:, i], label='Original', color='blue')
+            ax.plot(reconstructed[:, i], label='Reconstructed', color='red', linestyle='--')
             ax.set_title(f"Dimension {i+1}")
             ax.legend()
 
         plt.tight_layout()
-        print(f'Saving at {config.training.save_path}')
-        plt.savefig(f"{config.training.save_path}/{modality_name}_reconstruction.png")
+        plt.savefig(os.path.join(save_path, f"{modality}_reconstruction.png"))
         plt.close()
+
+    print(f"Reconstruction plots saved in {save_path}")
 
 if __name__ == "__main__":
     test_reconstruction()

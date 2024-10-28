@@ -5,33 +5,44 @@ import numpy as np
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 from robot_clip.utils import load_model_and_config
-from train import load_and_normalize_data
+from robot_clip.data_loading import get_dataloaders, normalize_data, denormalize_data
+import os
+from hydra.utils import to_absolute_path
 
-@hydra.main(config_path="../config", config_name="config")
+@hydra.main(config_path="../config", config_name="two_step_config")
 def visualize_tsne(config: DictConfig):
-    # Load and normalize the data
-    data, _ = load_and_normalize_data(config)
+    # Load the data
+    data_loader, _, normalization_params = get_dataloaders(config)
     
     # Load the trained model, its config, and normalization parameters
     model, loaded_config, _ = load_model_and_config(
-        config.training.save_path,
+        to_absolute_path(config.training.save_path),
         config.wandb.run_name,
-        config.training.num_epochs
+        config.training.encoder_epochs + config.training.decoder_epochs
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
 
-    # Select a random subset of data
-    num_samples = 1000
-    indices = np.random.choice(len(data['mano']), num_samples, replace=False)
+    # Select a random subset of data from the test loader
+    num_samples = min(1000, len(data_loader.dataset))
+    indices = np.random.choice(len(data_loader.dataset), num_samples, replace=False)
     
     embeddings = {}
     with torch.no_grad():
-        for modality in data.keys():
-            input_data = data[modality][indices].to(device)
-            embeddings[modality] = model.encoders[modality](input_data).cpu().numpy()
+        for idx in indices:
+            sample = data_loader.dataset[idx]
+            for modality, data in sample.items():
+                if modality not in embeddings:
+                    embeddings[modality] = []
+                # Convert numpy array to torch tensor if needed
+                if isinstance(data, np.ndarray):
+                    data = torch.from_numpy(data).float()
+                embeddings[modality].append(model.encoders[modality](data.unsqueeze(0).to(device)).cpu().numpy())
+
+    for modality in embeddings:
+        embeddings[modality] = np.concatenate(embeddings[modality], axis=0)
 
     # Perform t-SNE
     tsne = TSNE(n_components=2, random_state=42)
@@ -50,8 +61,12 @@ def visualize_tsne(config: DictConfig):
     plt.legend()
     plt.title("t-SNE visualization of embeddings")
 
-    print(f'Saving at {config.training.save_path}')
-    plt.savefig(f"{config.training.save_path}/tsne_embeddings.png")
+    # Change the save path to a 'tests' directory
+    save_path = to_absolute_path(os.path.join("tests", "outputs", config.wandb.run_name))
+    os.makedirs(save_path, exist_ok=True)
+
+    print(f'Saving at {save_path}')
+    plt.savefig(f"{save_path}/tsne_embeddings.png")
     plt.close()
 
 if __name__ == "__main__":

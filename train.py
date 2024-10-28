@@ -1,53 +1,21 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import torch
-from torch.utils.data import DataLoader, TensorDataset, random_split
-import numpy as np
 import wandb
 from tqdm import tqdm
 from robot_clip.model import RobotCLIP
+from robot_clip.data_loading.dataset import get_dataloaders
+from robot_clip.utils import create_optimizer, save_model
 import os
-
-def load_and_normalize_data(config: DictConfig):
-    data = np.load(config.data.source_file, allow_pickle=True).item()
-    normalized_data = {}
-    normalization_params = {}
-
-    for modality, tensor in data.items():
-        mean = np.mean(tensor, axis=0)
-        std = np.std(tensor, axis=0)
-        normalized_tensor = (tensor - mean) / (std + 1e-8)  # Add small epsilon to avoid division by zero
-        normalized_data[modality] = torch.tensor(normalized_tensor, dtype=torch.float32)
-        normalization_params[modality] = {'mean': mean, 'std': std}
-
-    return normalized_data, normalization_params
-
-def create_optimizer(config: DictConfig, model_params):
-    optimizer_name = config.optimizer.name
-    optimizer_params = {k: v for k, v in config.optimizer.items() if k != "name" and k != "optimizer"}
-    
-    if optimizer_name == "Adam":
-        return torch.optim.Adam(model_params, **optimizer_params)
-    elif optimizer_name == "SGD":
-        return torch.optim.SGD(model_params, **optimizer_params)
-    elif optimizer_name == "RMSprop":
-        return torch.optim.RMSprop(model_params, **optimizer_params)
-    else:
-        raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 def train_epoch(model, optimizer, train_loader, config, device):
     model.train()
     epoch_losses = {}
 
     for batch in tqdm(train_loader, desc="Training"):
-        batch = [t.to(device) for t in batch]
-        batch_dict = {
-            "mano": batch[0],
-            "faive": batch[1],
-            "simple_gripper": batch[2]
-        }
+        batch = {k: v.to(device) for k, v in batch.items()}
         optimizer.zero_grad()
-        loss_dict = model.training_step(batch_dict)
+        loss_dict = model.training_step(batch)
         loss = loss_dict["loss"]
         loss.backward()
         optimizer.step()
@@ -69,13 +37,8 @@ def evaluate(model, test_loader, config, device):
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Evaluating"):
-            batch = [t.to(device) for t in batch]
-            batch_dict = {
-                "mano": batch[0],
-                "faive": batch[1],
-                "simple_gripper": batch[2]
-            }
-            loss_dict = model.training_step(batch_dict)
+            batch = {k: v.to(device) for k, v in batch.items()}
+            loss_dict = model.training_step(batch)
 
             for k, v in loss_dict.items():
                 if k not in epoch_losses:
@@ -87,20 +50,6 @@ def evaluate(model, test_loader, config, device):
         epoch_losses[k] /= len(test_loader)
 
     return epoch_losses
-
-def save_model(model, optimizer, epoch, config, run_name, normalization_params):
-    # Use only the wandb run name for the directory
-    save_dir = os.path.join(config.training.save_path, run_name)
-    print(f"Saving model to {save_dir}")
-    os.makedirs(save_dir, exist_ok=True)
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'config': OmegaConf.to_container(config, resolve=True),
-        'normalization_params': normalization_params
-    }
-    torch.save(checkpoint, os.path.join(save_dir, f'model_epoch_{epoch}.pth'))
 
 @hydra.main(config_path="config", config_name="config", version_base="1.1")
 def train(config: DictConfig):
@@ -118,19 +67,7 @@ def train(config: DictConfig):
     device = torch.device(f"cuda:{config.training.gpu_id}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    data, normalization_params = load_and_normalize_data(config)
-    
-    # Create a TensorDataset
-    dataset = TensorDataset(*[tensor for tensor in data.values()])
-    
-    # Split the dataset
-    train_size = int(config.data.train_split * len(dataset))
-    test_size = len(dataset) - train_size
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-
-    # Create DataLoaders
-    train_loader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=config.training.batch_size)
+    train_loader, test_loader, normalization_params = get_dataloaders(config)
 
     model = RobotCLIP(config).to(device)
     optimizer = create_optimizer(config, model.parameters())

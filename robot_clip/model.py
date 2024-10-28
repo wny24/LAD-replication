@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from typing import Dict, List
+from robot_clip.objectives import info_nce  # Add this import at the top
 
 class ModalityEncoder(nn.Module):
     def __init__(self, input_dim: int, hidden_dims: List[int], output_dim: int):
@@ -11,6 +12,7 @@ class ModalityEncoder(nn.Module):
         in_dim = input_dim
         for hidden_dim in hidden_dims:
             layers.append(nn.Linear(in_dim, hidden_dim))
+            layers.append(nn.LayerNorm(hidden_dim))
             layers.append(nn.ReLU())
             in_dim = hidden_dim
         layers.append(nn.Linear(in_dim, output_dim))
@@ -26,6 +28,7 @@ class ModalityDecoder(nn.Module):
         in_dim = input_dim
         for hidden_dim in hidden_dims:
             layers.append(nn.Linear(in_dim, hidden_dim))
+            layers.append(nn.LayerNorm(hidden_dim))
             layers.append(nn.ReLU())
             in_dim = hidden_dim
         layers.append(nn.Linear(in_dim, output_dim))
@@ -61,17 +64,33 @@ class RobotCLIP(nn.Module):
         reconstructions = self.decode(embeddings)
         return embeddings, reconstructions
 
-    def contrastive_loss(self, embeddings: Dict[str, torch.Tensor], temperature: float = 0.07):
+    def contrastive_loss(self, embeddings: Dict[str, torch.Tensor], temperature: float = None):
+        # Use provided temperature if given, otherwise use default
+        temp = temperature if temperature is not None else 0.07
+        
         loss = 0
         num_modalities = len(embeddings)
+        modalities = list(embeddings.keys())
 
-        for i, (mod1, emb1) in enumerate(embeddings.items()):
-            for j, (mod2, emb2) in enumerate(embeddings.items()):
-                if i < j:
-                    sim_matrix = F.cosine_similarity(emb1.unsqueeze(1), emb2.unsqueeze(0), dim=2) / temperature
-                    labels = torch.arange(sim_matrix.size(0)).to(sim_matrix.device)
-                    loss += F.cross_entropy(sim_matrix, labels) + F.cross_entropy(sim_matrix.t(), labels)
+        # Compute pairwise InfoNCE loss between modalities
+        # bidirectional loss
+        for i in range(num_modalities):
+            for j in range(i + 1, num_modalities):
+                # Get embeddings for the pair of modalities
+                query = embeddings[modalities[i]]
+                positive_key = embeddings[modalities[j]]
+                
+                # Compute bidirectional InfoNCE loss
+                # First direction: modality i -> modality j
+                loss += info_nce(
+                    query=query,
+                    positive_key=positive_key,
+                    negative_keys=None,  # Use other samples as negatives implicitly
+                    temperature=temp,
+                    reduction='mean'
+                )
 
+        # Normalize by number of pairs
         return loss / (num_modalities * (num_modalities - 1))
 
     def reconstruction_loss(self, inputs: Dict[str, torch.Tensor], reconstructions: Dict[str, torch.Tensor]):
