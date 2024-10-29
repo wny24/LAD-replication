@@ -9,7 +9,7 @@ data:
   test_episode: false
 
 model:
-  embedding_dim: 48
+  embedding_dim: 32
   modalities: ${modalities}
   contrastive_loss_weight: 1.0  # Scaling parameter for contrastive loss
 
@@ -39,7 +39,7 @@ optimizer:
 
 temperature:
   initial: 0.1
-  final: 0.01
+  final: 0.05
   # Different schedule options: 'linear', 'exponential', 'cosine'
   schedule: 'linear'
   # Only apply annealing during encoder training

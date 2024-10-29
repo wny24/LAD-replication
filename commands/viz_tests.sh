@@ -1,6 +1,6 @@
 #!/bin/bash
 
-run_name="spring-night-11"
+run_name="decent-sun-28"
 num_epochs=200
 test_file="/mnt/data/erbauer/retargeting/retargeted_data_v4_faiveonly_plush_pick_test.npy"
 

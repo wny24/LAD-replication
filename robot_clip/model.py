@@ -54,10 +54,10 @@ class RobotCLIP(nn.Module):
             )
 
     def encode(self, inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        return {modality: self.encoders[modality](inputs[modality]) for modality in self.modalities}
+        return {modality: self.encoders[modality](inputs[modality]) for modality in inputs}
 
     def decode(self, embeddings: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        return {modality: self.decoders[modality](embeddings[modality]) for modality in self.modalities}
+        return {modality: self.decoders[modality](embeddings[modality]) for modality in embeddings}
 
     def forward(self, inputs: Dict[str, torch.Tensor]):
         embeddings = self.encode(inputs)
@@ -96,6 +96,25 @@ class RobotCLIP(nn.Module):
     def reconstruction_loss(self, inputs: Dict[str, torch.Tensor], reconstructions: Dict[str, torch.Tensor]):
         return {modality: F.mse_loss(inputs[modality], reconstructions[modality]) for modality in self.modalities}
 
+    def self_and_cross_reconstruction_loss(self, inputs: Dict[str, torch.Tensor], embeddings: Dict[str, torch.Tensor]):
+        """
+        Compute self and cross-reconstruction loss where each modality's embedding is used to reconstruct other modalities.
+        This is only used for evaluation/testing.
+        """
+        cross_losses = {}
+        
+        for source_modality in self.modalities:
+            source_embedding = embeddings[source_modality]
+            
+            for target_modality in self.modalities:
+                # Use source modality's embedding to reconstruct target modality
+                cross_reconstruction = self.decoders[target_modality](source_embedding)
+                cross_loss = F.mse_loss(inputs[target_modality], cross_reconstruction)
+                
+                cross_losses[f"{source_modality}_to_{target_modality}"] = cross_loss
+        
+        return cross_losses
+
     def training_step(self, batch: Dict[str, torch.Tensor]):
         embeddings, reconstructions = self(batch)
         contrastive_loss = self.contrastive_loss(embeddings)
@@ -108,4 +127,19 @@ class RobotCLIP(nn.Module):
             "loss": total_loss,
             "contrastive_loss": contrastive_loss,
             **{f"{modality}_reconstruction_loss": loss for modality, loss in reconstruction_losses.items()}
+        }
+
+    def validation_step(self, batch: Dict[str, torch.Tensor]):
+        """
+        Similar to training step but includes cross-reconstruction losses for evaluation.
+        """
+        embeddings, reconstructions = self(batch)
+        contrastive_loss = self.contrastive_loss(embeddings)
+        reconstruction_losses = self.reconstruction_loss(batch, reconstructions)
+        cross_reconstruction_losses = self.self_and_cross_reconstruction_loss(batch, embeddings)
+        
+        return {
+            **{f"{modality}_reconstruction_loss": loss for modality, loss in reconstruction_losses.items()},
+            "contrastive_loss": contrastive_loss,
+            **{f"{key}_loss": value for key, value in cross_reconstruction_losses.items()}
         }

@@ -74,24 +74,21 @@ def evaluate(model, test_loader, config, device, current_epoch):
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Evaluating"):
             batch = {k: v.to(device) for k, v in batch.items()}
-            embeddings = model.encode(batch)
-            contrastive_loss = model.contrastive_loss(embeddings, temperature=current_temp)
-            reconstructions = model.decode(embeddings)
-            reconstruction_losses = model.reconstruction_loss(batch, reconstructions)
-
-            if "contrastive_loss" not in epoch_losses:
-                epoch_losses["contrastive_loss"] = 0
-            epoch_losses["contrastive_loss"] += contrastive_loss.item()
-
-            for k, v in reconstruction_losses.items():
+            
+            # Get all losses using validation_step
+            step_losses = model.validation_step(batch)
+            
+            # Accumulate all losses
+            for k, v in step_losses.items():
                 if k not in epoch_losses:
                     epoch_losses[k] = 0
                 epoch_losses[k] += v.item()
 
+    # Average all losses
     for k in epoch_losses:
         epoch_losses[k] /= len(test_loader)
+    
     epoch_losses["temperature"] = current_temp
-
     return epoch_losses
 
 @hydra.main(config_path="config", config_name="two_step_config", version_base="1.1")
