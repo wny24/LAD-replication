@@ -5,9 +5,9 @@ modalities:
     decoder_hidden_dims: [64]
   faive:
     input_dim: 11
-    encoder_hidden_dims: [16]
-    decoder_hidden_dims: [16]
+    encoder_hidden_dims: [24]
+    decoder_hidden_dims: [24]
   simple_gripper:
     input_dim: 1
-    encoder_hidden_dims: [4]
-    decoder_hidden_dims: [4]
+    encoder_hidden_dims: [24]
+    decoder_hidden_dims: [24]

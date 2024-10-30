@@ -41,7 +41,9 @@ class RobotClipDataset(Dataset):
         for key, tensor in data.items():
             mean = np.mean(tensor, axis=0)
             std = np.std(tensor, axis=0)
-            normalization_params[key] = {'mean': mean, 'std': std}
+            mins = np.min(tensor, axis=0)
+            maxs = np.max(tensor, axis=0)
+            normalization_params[key] = {'mean': mean, 'std': std, 'mins': mins, 'maxs': maxs}
 
         return normalization_params
 
@@ -61,10 +63,10 @@ def get_dataloaders(config: DictConfig):
     # Split the dataset
     train_size = int(config.data.train_split * len(dataset))
     test_size = len(dataset) - train_size
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size], generator=torch.Generator().manual_seed(42))
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
     # Create DataLoaders
-    train_loader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=config.training.batch_size)
+    train_loader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True, pin_memory=True, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=config.training.batch_size, pin_memory=True, num_workers=4)
 
     return train_loader, test_loader, dataset.normalization_params

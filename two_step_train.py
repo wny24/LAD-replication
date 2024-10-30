@@ -9,6 +9,8 @@ from robot_clip.utils import create_optimizer, save_model, get_temperature
 import os
 from hydra.utils import to_absolute_path
 
+torch.manual_seed(42)
+
 def train_encoders(model, optimizer, train_loader, config, device, current_epoch):
     model.train()
     epoch_losses = {}

@@ -41,7 +41,7 @@ def test_cross_reconstruction(config: DictConfig):
     model, loaded_config, _ = load_model_and_config(
         to_absolute_path(config.training.save_path),
         config.wandb.run_name,
-        config.training.encoder_epochs + config.training.decoder_epochs
+        config.training.test_epoch
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
