@@ -1,7 +1,7 @@
 #!/bin/bash
 
-run_name="tricky-twilight-40"
-num_epochs=310
+run_name="vital-sweep-68"
+num_epochs=350
 test_file="/mnt/data/erbauer/retargeting/retargeted_data_v4_faiveonly_plush_pick_test.npy"
 test_file_h5="/mnt/data1/erbauer/plush_pick_test/episode_0_success.h5"
 

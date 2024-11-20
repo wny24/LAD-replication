@@ -1,0 +1,42 @@
+program: two_step_train.py
+method: bayes
+metric:
+  goal: minimize
+  name: decoder/test/total_cross_reconstruction_loss
+parameters:
+  model.encoder_dropout:
+    values: [0.0, 0.1, 0.2]
+  model.decoder_dropout:
+    values: [0.0, 0.1, 0.2]
+  model.embedding_dim:
+    values: [16, 32, 64, 128]
+  training.batch_size:
+    values: [2048, 4096, 8192, 12000]
+  training.encoder_epochs:
+    values: [250, 300, 350, 400]
+  
+  optimizer.encoder.lr:
+    values: [0.0001, 0.0005, 0.001]
+  optimizer.encoder.weight_decay:
+    values: [0.0001, 0.0005, 0.001]
+  optimizer.decoder.lr:
+    values: [0.0001, 0.0005, 0.001]
+  optimizer.decoder.weight_decay:
+    values: [0.0001, 0.0005, 0.001]
+
+  temperature.initial:
+    values: [0.15, 0.3, 0.4, 0.5]
+  temperature.final:
+    values: [0.05, 0.1, 0.15, 0.2]
+  temperature.schedule:
+    values: ["linear", "exponential"]
+  temperature.start_epoch:
+    values: [0]
+  temperature.end_epoch:
+    values: [100, 150, 200, 250]
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args_no_hyphens}

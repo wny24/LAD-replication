@@ -12,6 +12,8 @@ model:
   embedding_dim: 32
   modalities: ${modalities}
   contrastive_loss_weight: 1.0  # Scaling parameter for contrastive loss
+  encoder_dropout: 0.1  # Dropout rate for encoders
+  decoder_dropout: 0.1  # Dropout rate for decoders
 
 training:
   batch_size: 12000

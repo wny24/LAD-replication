@@ -6,7 +6,7 @@ from typing import Dict, List
 from robot_clip.objectives import info_nce  # Add this import at the top
 
 class ModalityEncoder(nn.Module):
-    def __init__(self, input_dim: int, hidden_dims: List[int], output_dim: int):
+    def __init__(self, input_dim: int, hidden_dims: List[int], output_dim: int, dropout_rate: float = 0.1):
         super().__init__()
         layers = []
         in_dim = input_dim
@@ -14,6 +14,7 @@ class ModalityEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, hidden_dim))
             layers.append(nn.LayerNorm(hidden_dim))
             layers.append(nn.ReLU())
+            layers.append(nn.Dropout(p=dropout_rate))
             in_dim = hidden_dim
         layers.append(nn.Linear(in_dim, output_dim))
         self.model = nn.Sequential(*layers)
@@ -22,7 +23,7 @@ class ModalityEncoder(nn.Module):
         return self.model(x)
 
 class ModalityDecoder(nn.Module):
-    def __init__(self, input_dim: int, hidden_dims: List[int], output_dim: int):
+    def __init__(self, input_dim: int, hidden_dims: List[int], output_dim: int, dropout_rate: float = 0.1):
         super().__init__()
         layers = []
         in_dim = input_dim
@@ -30,6 +31,7 @@ class ModalityDecoder(nn.Module):
             layers.append(nn.Linear(in_dim, hidden_dim))
             layers.append(nn.LayerNorm(hidden_dim))
             layers.append(nn.ReLU())
+            layers.append(nn.Dropout(p=dropout_rate))
             in_dim = hidden_dim
         layers.append(nn.Linear(in_dim, output_dim))
         self.model = nn.Sequential(*layers)
@@ -41,16 +43,22 @@ class RobotCLIP(nn.Module):
     def __init__(self, config: DictConfig):
         super().__init__()
         self.config = config
-        self.modalities = config.model.modalities.modalities  # Note the nested structure
+        self.modalities = config.model.modalities.modalities
         self.encoders = nn.ModuleDict()
         self.decoders = nn.ModuleDict()
 
         for modality, params in self.modalities.items():
             self.encoders[modality] = ModalityEncoder(
-                params.input_dim, params.encoder_hidden_dims, config.model.embedding_dim
+                params.input_dim, 
+                params.encoder_hidden_dims, 
+                config.model.embedding_dim,
+                dropout_rate=config.model.encoder_dropout
             )
             self.decoders[modality] = ModalityDecoder(
-                config.model.embedding_dim, params.decoder_hidden_dims, params.input_dim
+                config.model.embedding_dim, 
+                params.decoder_hidden_dims, 
+                params.input_dim,
+                dropout_rate=config.model.decoder_dropout
             )
 
     def encode(self, inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -102,7 +110,7 @@ class RobotCLIP(nn.Module):
         This is only used for evaluation/testing.
         """
         cross_losses = {}
-        
+        total_loss = 0
         for source_modality in self.modalities:
             source_embedding = embeddings[source_modality]
             
@@ -112,8 +120,10 @@ class RobotCLIP(nn.Module):
                 cross_loss = F.mse_loss(inputs[target_modality], cross_reconstruction)
                 
                 cross_losses[f"{source_modality}_to_{target_modality}"] = cross_loss
+                total_loss += cross_loss
         
-        return cross_losses
+        total_loss /= len(self.modalities) * len(self.modalities)
+        return cross_losses, total_loss
 
     def training_step(self, batch: Dict[str, torch.Tensor]):
         embeddings, reconstructions = self(batch)
@@ -136,10 +146,11 @@ class RobotCLIP(nn.Module):
         embeddings, reconstructions = self(batch)
         contrastive_loss = self.contrastive_loss(embeddings)
         reconstruction_losses = self.reconstruction_loss(batch, reconstructions)
-        cross_reconstruction_losses = self.self_and_cross_reconstruction_loss(batch, embeddings)
+        cross_reconstruction_losses, total_cross_reconstruction_loss = self.self_and_cross_reconstruction_loss(batch, embeddings)
         
         return {
             **{f"{modality}_reconstruction_loss": loss for modality, loss in reconstruction_losses.items()},
             "contrastive_loss": contrastive_loss,
-            **{f"{key}_loss": value for key, value in cross_reconstruction_losses.items()}
+            **{f"{key}_loss": value for key, value in cross_reconstruction_losses.items()},
+            "total_cross_reconstruction_loss": total_cross_reconstruction_loss
         }
