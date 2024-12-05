@@ -15,16 +15,16 @@ def adapt_data_keys(data, modality_mapping=MODALITY_MAPPING):
 def normalize_data(data, normalization_params):
     normalized_data = {}
     for key, tensor in data.items():
-        mean = normalization_params[key]['mean']
-        std = normalization_params[key]['std']
+        mean = torch.tensor(normalization_params[key]['mean']).to(tensor.device)
+        std = torch.tensor(normalization_params[key]['std']).to(tensor.device)
         normalized_data[key] = (tensor - mean) / (std + 1e-8)
     return normalized_data
 
 def denormalize_data(data, normalization_params):
     denormalized_data = {}
     for key, tensor in data.items():
-        mean = normalization_params[key]['mean']
-        std = normalization_params[key]['std']
+        mean = torch.tensor(normalization_params[key]['mean']).to(tensor.device)
+        std = torch.tensor(normalization_params[key]['std']).to(tensor.device)
         denormalized_data[key] = tensor * std + mean
     return denormalized_data
 
