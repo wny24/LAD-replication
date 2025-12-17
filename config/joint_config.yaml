@@ -1,0 +1,60 @@
+defaults:
+  - modalities: default
+  - optimizer: adam
+  - _self_
+
+data:
+  # Path to your dataset file (update as needed)
+  source_file: "/mnt/data/erbauer/retargeting/retargeted_data_v5_faiveonly.npy"
+  train_split: 0.8  # 80% for training, 20% for testing
+
+model:
+  embedding_dim: 32
+  modalities: ${modalities}
+  contrastive_loss_weight: 1.0    # Scaling parameter for contrastive loss (used in training_step)
+  joint_contrastive_weight: 0.1   # Weight applied to contrastive loss when doing joint training
+  encoder_dropout: 0.1
+  decoder_dropout: 0.1
+
+training:
+  batch_size: 1024
+  # Number of epochs to run joint training (encoders + decoders)
+  joint_epochs: 100
+  # Keep legacy two-step fields for compatibility with other scripts
+  encoder_epochs: 200
+  decoder_epochs: 50
+  log_interval: 10
+  debug: false
+  save_interval: 10
+  save_path: "checkpoints_joint"
+  gpu_id: 0
+
+wandb:
+  project: "robot-clip-joint"
+  entity: "erikbauer"
+
+optimizer:
+  # Optional explicit joint optimizer config. If absent, top-level or encoder/decoder configs will be used.
+  joint:
+    name: "Adam"
+    lr: 0.001
+    weight_decay: 0.0001
+
+  # Encoder/decoder configs remain available for two-step or separate training scripts
+  encoder:
+    name: "Adam"
+    lr: 0.001
+    weight_decay: 0.0001
+  decoder:
+    name: "Adam"
+    lr: 0.001
+    weight_decay: 0.0001
+
+temperature:
+  initial: 0.3
+  final: 0.05
+  # schedule options: 'linear', 'exponential', 'cosine'
+  schedule: 'exponential'
+  # When to start / end annealing (epoch indices, inclusive/exclusive semantics follow training code)
+  start_epoch: 0
+  end_epoch: 120

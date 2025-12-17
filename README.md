@@ -8,7 +8,15 @@ Your data should be preprocessed in a NumPy (.npy) file, containing a dictionary
 
 ### Model Training
 
-For first training encoders, then decoders, run `python two_step_train.py --config-name two_step_config.yaml` with a reference to the Hydra config of your choice. For joint training, run `python train.py --config-name config.yaml`.
+Two-step training (encoders then decoders):
+- Run `python two_step_train.py --config-name two_step_config.yaml` to first train encoders and then decoders using the provided Hydra config.
+
+Joint training (train encoders and decoders together):
+- Run `python joint_train.py --config-name joint_config.yaml` to train encoders and decoders jointly. The joint training script uses `config/joint_config.yaml` (or another Hydra config of your choice) and logs training metrics to wandb when enabled.
+
+Notes:
+- Both training flows use the repository's NumPy-based dataset loader. Your dataset must be a NumPy `.npy` file containing a dictionary that maps modality names to arrays of shape `(N, d_action)`. Point the config's `data.source_file` to that `.npy` file.
+- Config files live in the `config/` directory. Adjust optimizer, batch size, temperature schedule, and save paths via those configs.
 
 ### Usage
 
