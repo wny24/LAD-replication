@@ -1,0 +1,52 @@
+defaults:
+  - modalities: mano_xhand_g2
+  - optimizer: adam
+  - _self_
+
+data:
+  source_file: "../retargeting/data/aligned_mano_xhand_g2.npy"
+  train_split: 0.8
+
+model:
+  embedding_dim: 32
+  modalities: ${modalities}
+  contrastive_loss_weight: 1.0
+  joint_contrastive_weight: 0.1
+  encoder_dropout: 0.1
+  decoder_dropout: 0.1
+
+training:
+  batch_size: 1024
+  joint_epochs: 100
+  encoder_epochs: 200
+  decoder_epochs: 50
+  log_interval: 10
+  debug: false
+  save_interval: 10
+  save_path: "checkpoints_joint_xhand_g2"
+  gpu_id: 0
+
+wandb:
+  project: "robot-clip-joint"
+  entity: "erikbauer"
+
+optimizer:
+  joint:
+    name: "Adam"
+    lr: 0.001
+    weight_decay: 0.0001
+  encoder:
+    name: "Adam"
+    lr: 0.001
+    weight_decay: 0.0001
+  decoder:
+    name: "Adam"
+    lr: 0.001
+    weight_decay: 0.0001
+
+temperature:
+  initial: 0.3
+  final: 0.05
+  schedule: "exponential"
+  start_epoch: 0
+  end_epoch: 120

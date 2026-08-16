@@ -6,6 +6,8 @@ This is the public implementation for the contrastive action model from "Latent 
 
 Your data should be preprocessed in a NumPy (.npy) file, containing a dictionary with keys that are the modality names and values that are arrays of shape (N, d\_action), where each row entry across modalities should be semantically aligned.
 
+For human / XHand / G2 data, generate that file with `../retargeting` (keys `local_representation`, `xhand_angles`, `g2_width`) and train with `two_step_xhand_g2.yaml` or `joint_xhand_g2.yaml`.
+
 ### Model Training
 
 Two-step training (encoders then decoders):

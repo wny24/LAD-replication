@@ -3,10 +3,12 @@ import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from omegaconf import DictConfig
 
-MODALITY_MAPPING = {    
-    'local_representation': 'mano',
-    'faive_angles': 'faive',
-    'simple_gripper': 'simple_gripper'
+MODALITY_MAPPING = {
+    "local_representation": "mano",
+    "faive_angles": "faive",
+    "simple_gripper": "simple_gripper",
+    "xhand_angles": "xhand",
+    "g2_width": "g2",
 }
 
 def adapt_data_keys(data, modality_mapping=MODALITY_MAPPING):

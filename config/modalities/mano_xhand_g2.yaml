@@ -1,0 +1,13 @@
+modalities:
+  mano:
+    input_dim: 189
+    encoder_hidden_dims: [64]
+    decoder_hidden_dims: [64]
+  xhand:
+    input_dim: 12
+    encoder_hidden_dims: [24]
+    decoder_hidden_dims: [24]
+  g2:
+    input_dim: 1
+    encoder_hidden_dims: [24]
+    decoder_hidden_dims: [24]
