@@ -186,10 +186,25 @@ class EpisodeWindowDataset(Dataset):
         return item
 
 
+RAW_ACTION_DIM = {"mano": 189, "xhand": 12, "g2": 1}
+
+
+def _pad_action(action: torch.Tensor, width: int) -> torch.Tensor:
+    """Pad trailing action dims with zeros so mixed-embodiment batches can stack."""
+    if action.shape[-1] == width:
+        return action
+    if action.shape[-1] > width:
+        raise ValueError(f"action dim {action.shape[-1]} > pad width {width}")
+    pad = torch.zeros(*action.shape[:-1], width - action.shape[-1], dtype=action.dtype)
+    return torch.cat([action, pad], dim=-1)
+
+
 def _collate(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+    width = max(int(row["action"].shape[-1]) for row in batch)
     out: Dict[str, Any] = {
         "embodiment": [row["embodiment"] for row in batch],
-        "action": torch.stack([row["action"] for row in batch], dim=0),
+        # Pad hand actions (e.g. 12 vs 1) so xhand/g2 can share a batch; CLIP encode slices by embodiment.
+        "action": torch.stack([_pad_action(row["action"], width) for row in batch], dim=0),
         "wrist_pose": torch.stack([row["wrist_pose"] for row in batch], dim=0),
     }
     if "obs_image" in batch[0]:

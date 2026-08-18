@@ -11,6 +11,9 @@ import torch.nn as nn
 from robot_clip.data_loading.dataset import denormalize_data, normalize_data
 from robot_clip.utils import load_checkpoint_file
 
+# Must match diffusion/dataset.py RAW_ACTION_DIM
+_RAW_ACTION_DIM = {"mano": 189, "xhand": 12, "g2": 1}
+
 
 class FrozenActionCLIP(nn.Module):
     """Load a trained contrastive action model and freeze every parameter.
@@ -78,11 +81,17 @@ class FrozenActionCLIP(nn.Module):
         embodiments: Iterable[str],
         raw_action: torch.Tensor,
     ) -> torch.Tensor:
-        """Encode a batch that may mix embodiments. ``raw_action`` is (B, H, D)."""
+        """Encode a batch that may mix embodiments. ``raw_action`` is (B, H, D_pad).
+
+        Trailing dims may be zero-padded (see dataset collate); each sample is
+        sliced to the modality's true ``input_dim`` before the frozen encoder.
+        """
         embodiments = list(embodiments)
         if len(set(embodiments)) == 1:
-            return self.encode(embodiments[0], raw_action)
+            dim = _RAW_ACTION_DIM[embodiments[0]]
+            return self.encode(embodiments[0], raw_action[..., :dim])
         latents = []
         for index, name in enumerate(embodiments):
-            latents.append(self.encode(name, raw_action[index]))
+            dim = _RAW_ACTION_DIM[name]
+            latents.append(self.encode(name, raw_action[index, ..., :dim]))
         return torch.stack(latents, dim=0)

@@ -16,31 +16,58 @@
 
 ```bash
 conda activate LAD   # 或服务器上的 robot_clip 环境
-pip install hydra-core omegaconf torchvision tqdm
+pip install hydra-core omegaconf torchvision tqdm opencv-python-headless
 cd /home/wny24/LAD-replication/robot_clip
 pip install -e .
 ```
 
-## 数据（目前为空）
+## 真机 transport 数据 → diffusion 格式
 
-把 demonstration 放进 `diffusion/data/`，并编辑 `diffusion/data/manifest.yaml`。每个 episode 一个 `.npz`，时间轴对齐：
+已解压的原始 zip 在：
+
+- `data/raw_xhand/transport-test/`（XHand，单臂 `(T,19)=7` 臂 + `12` 指）
+- `data/raw_g2/transport_g2_controller/`（G2，单臂 `(T,8)=7` 臂 + `1` 夹爪 `0..1000`）
+
+转换（左右臂各写成一条 episode）：
+
+```bash
+cd /home/wny24/LAD-replication/robot_clip/diffusion
+python scripts/convert_transport.py --overwrite
+# 试跑前 2 条：  python scripts/convert_transport.py --max-episodes 2 --overwrite
+# 只要左臂：      python scripts/convert_transport.py --sides left --overwrite
+```
+
+写出：
+
+| 输出 key | xhand | g2 | 用途 |
+|---|---|---|---|
+| `action` | `(T, 12)` 指关节 | `(T, 1)` 开合 `[0,1]`（÷1000） | 进冻结 CLIP |
+| `wrist_pose` | `(T, 7)` 臂关节指令 | `(T, 7)` | **不进 CLIP**，与 latent 拼接扩散 |
+| `lowdim_obs` | `(T, 7)` 臂 `qpos` | `(T, 7)` | 观测条件 |
+| `image` | `(T, 84, 84, 3)` | 同左 | ResNet 条件（mp4 按时间戳对齐） |
+
+`data/manifest.yaml` 会自动写成两条等权 dataset。训练配置默认 `wrist_dim=7`、`obs.lowdim_dim=7`。
+
+## 数据格式（通用）
+
+每个 episode 一个 `.npz`，时间轴对齐：
 
 | key | dtype | shape | 必填 | 含义 |
 |---|---|---|---|---|
 | `action` | float32 | `(T, D_raw)` | 是 | 该本体的末端动作，**物理单位**。`xhand` 为 12，`g2` 为 1，`mano` 为 189。DataLoader 会用冻结的 CLIP encoder 在线编成 32 维 latent。 |
-| `wrist_pose` | float32 | `(T, D_wrist)` | `wrist_dim>0` 时必填 | 腕部 / EEF 位姿，**不经过 CLIP**，与 latent 拼接后作为扩散目标。默认 `D_wrist=9`（xyz + 6D 旋转）。 |
+| `wrist_pose` | float32 | `(T, D_wrist)` | `wrist_dim>0` 时必填 | **不经过 CLIP**，与 latent 拼接后作为扩散目标。transport 数据为 7 维臂关节；笛卡尔 EEF 可用 9（xyz+6D）。 |
 | `image` | uint8 | `(T, H, W, 3)` 或 `(T, Ncam, H, W, 3)` | `obs.use_image=true` 时必填 | 与动作对齐的相机图。 |
 | `lowdim_obs` | float32 | `(T, D_low)` | `obs.lowdim_dim>0` 时必填 | 可选本体状态。 |
 
-`manifest.yaml` 示例（数据到位后取消注释并改 glob）：
+`manifest.yaml` 由转换脚本生成；也可手写：
 
 ```yaml
 datasets:
-  - name: xhand_pick
+  - name: transport_xhand
     glob: data/xhand/*.npz
-    embodiment: xhand    # mano | xhand | g2
+    embodiment: xhand
     weight: 1.0
-  - name: g2_pick
+  - name: transport_g2
     glob: data/g2/*.npz
     embodiment: g2
     weight: 1.0
@@ -69,8 +96,9 @@ python train.py \
   training.batch_size=256 \
   training.steps=90000 \
   horizon=16 \
-  wrist_dim=9 \
+  wrist_dim=7 \
   obs.use_image=true \
+  obs.lowdim_dim=7 \
   obs.n_obs_steps=2 \
   obs.n_cameras=1 \
   obs.image_size=84
