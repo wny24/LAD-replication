@@ -1,8 +1,12 @@
 import os
 import torch
 from omegaconf import DictConfig, OmegaConf
-from hydra.utils import to_absolute_path
 from robot_clip.model import RobotCLIP
+
+
+def _to_absolute_path(path: str) -> str:
+    from hydra.utils import to_absolute_path
+    return to_absolute_path(path)
 
 def create_optimizer(config: DictConfig, model_params, optimizer_config=None):
     if optimizer_config is None:
@@ -21,7 +25,7 @@ def create_optimizer(config: DictConfig, model_params, optimizer_config=None):
 
 def save_model(model, optimizer, epoch, config, run_name, normalization_params, is_two_step=False):
     # Use hydra's to_absolute_path for save directory
-    save_dir = to_absolute_path(os.path.join(config.training.save_path, run_name))
+    save_dir = _to_absolute_path(os.path.join(config.training.save_path, run_name))
     print(f"Saving model to {save_dir}")
     os.makedirs(save_dir, exist_ok=True)
     
@@ -41,30 +45,32 @@ def save_model(model, optimizer, epoch, config, run_name, normalization_params, 
     checkpoint_path = os.path.join(save_dir, f'model_epoch_{epoch}.pth')
     torch.save(checkpoint, checkpoint_path)
 
+def load_checkpoint_file(checkpoint_file: str):
+    """Load model, config, and train normalization stats from a .pth file."""
+    if not os.path.exists(checkpoint_file):
+        raise FileNotFoundError(f"No checkpoint found at {checkpoint_file}")
+
+    checkpoint = torch.load(
+        checkpoint_file, map_location=torch.device("cpu"), weights_only=False
+    )
+    if "config" not in checkpoint:
+        raise ValueError("Checkpoint does not contain configuration")
+    if "normalization_params" not in checkpoint:
+        raise ValueError("Checkpoint does not contain normalization parameters")
+
+    config = OmegaConf.create(checkpoint["config"])
+    model = RobotCLIP(config)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    return model, config, checkpoint["normalization_params"]
+
+
 def load_model_and_config(checkpoint_path: str, run_name: str, epoch: int):
     """
     Load the model, configuration, and normalization parameters from a checkpoint.
     """
     # Use hydra's to_absolute_path for loading
-    full_path = to_absolute_path(os.path.join(checkpoint_path, run_name, f'model_epoch_{epoch}.pth'))
-    
-    if not os.path.exists(full_path):
-        raise FileNotFoundError(f"No checkpoint found at {full_path}")
-    
-    checkpoint = torch.load(full_path, map_location=torch.device('cpu'))
-    
-    if 'config' not in checkpoint:
-        raise ValueError("Checkpoint does not contain configuration")
-    
-    if 'normalization_params' not in checkpoint:
-        raise ValueError("Checkpoint does not contain normalization parameters")
-    
-    config = OmegaConf.create(checkpoint['config'])
-    
-    model = RobotCLIP(config)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    
-    return model, config, checkpoint['normalization_params']
+    full_path = _to_absolute_path(os.path.join(checkpoint_path, run_name, f'model_epoch_{epoch}.pth'))
+    return load_checkpoint_file(full_path)
 
 def get_temperature(config, current_epoch):
     """Calculate temperature based on schedule and current epoch."""

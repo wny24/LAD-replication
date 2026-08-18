@@ -1,0 +1,15 @@
+# List demonstration folders. Leave empty until episode .npz files are in place.
+# Each glob is relative to robot_clip/diffusion/.
+#
+# Example:
+# datasets:
+#   - name: xhand_pick
+#     glob: data/xhand/*.npz
+#     embodiment: xhand   # mano | xhand | g2
+#     weight: 1.0
+#   - name: g2_pick
+#     glob: data/g2/*.npz
+#     embodiment: g2
+#     weight: 1.0
+
+datasets: []
