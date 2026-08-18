@@ -8,6 +8,4 @@ outputs/
 .hydra/
 *.npy
 *.npz
-diffusion/data/raw_*/
-diffusion/data/xhand/
-diffusion/data/g2/
+
