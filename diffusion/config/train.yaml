@@ -12,16 +12,16 @@ data:
   manifest: data/manifest.yaml
 
 horizon: 16
-# Transport teleop (after convert_transport.py): 7 xArm joint commands.
-# Set 9 for xyz+6D EEF pose datasets; 0 to diffuse CLIP latent only.
-wrist_dim: 7
+# Dual-arm transport: left+right arm joint commands (7+7).
+n_arms: 2
+wrist_dim: 14
 
 obs:
   use_image: true
   n_obs_steps: 2
   n_cameras: 1
   image_size: 84
-  lowdim_dim: 7   # arm joint state (qpos); 0 to disable
+  lowdim_dim: 14   # left+right arm qpos; 0 to disable
 
 unet:
   down_dims: [256, 512, 1024]

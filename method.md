@@ -304,20 +304,23 @@ RAW_ACTION_DIM = {"mano": 189, "xhand": 12, "g2": 1}
 
 ## 6. Arm / Wrist / Hand 对照小结
 
-| 概念 | 当前代码实现 | 不在代码里的部分 |
-|---|---|---|
-| **Hand** | `action` → CLIP latent → 扩散 latent 维 → `p_j` 解码为关节/夹爪 | — |
-| **Wrist** | `wrist_pose` 9-d，绕过 CLIP，与 latent 一起被 U-Net 扩散 | 需你在 `.npz` 里提供标定好的 EEF 轨迹 |
-| **Arm** | 无 7-DOF 关节角通道；臂的运动隐含在 `wrist_pose` 的笛卡尔位姿里 | xArm7 逆解 / 关节空间 policy 需后续扩展 |
+当前 **transport 双臂** 配置（`n_arms: 2`）：
 
-若只想扩散 **共享 latent、不含腕部**，设 `wrist_dim: 0`：
+| 概念 | 数据字段 | CLIP | Diffusion U-Net |
+|---|---|---|---|
+| **Hand L/R** | `action` = `[q_hand_L, q_hand_R]`（xhand 24 / g2 2） | 左右**分别** \(q_i\) → \(z_L\|z_R\)（64） | 扩散这 64 维 latent |
+| **Arm L/R（指令）** | `wrist_pose` = `[q_arm_L, q_arm_R]`（14） | **不进** | 与 latent 拼接一起扩散 |
+| **Arm L/R（实测）** | `lowdim_obs` = `[qpos_L, qpos_R]`（14） | 否 | 只作观测条件（ResNet 旁路 MLP） |
+
+单臂消融可设 `n_arms: 1` 并使用单侧转换数据；默认双臂策略一次 `sample` 输出完整左右动作。
+
+若只想扩散 CLIP latent、不含臂关节：
 
 ```yaml
-# diffusion/config/train.yaml
 wrist_dim: 0
 ```
 
-此时 U-Net 的 `action_dim = 32`，推理只输出 `latent` + `clip.decode` 的 hand action，无 `wrist_pose` 分支。
+（仍建议保留 `n_arms: 2` 以便双手 latent 协同。）
 
 ---
 

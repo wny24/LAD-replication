@@ -35,7 +35,14 @@ def trainable_params(policy: LatentDiffusionPolicy):
     return list(policy.obs_encoder.parameters()) + list(policy.unet.parameters())
 
 
-def fit_normalizer(loader, clip: FrozenActionCLIP, wrist_dim: int, max_samples: int, device: torch.device):
+def fit_normalizer(
+    loader,
+    clip: FrozenActionCLIP,
+    wrist_dim: int,
+    max_samples: int,
+    device: torch.device,
+    n_arms: int = 1,
+):
     import numpy as np
 
     rows = []
@@ -44,7 +51,7 @@ def fit_normalizer(loader, clip: FrozenActionCLIP, wrist_dim: int, max_samples: 
     with torch.no_grad():
         for batch in loader:
             batch = move_batch(batch, device)
-            z = clip.encode_batch(batch["embodiment"], batch["action"])
+            z = clip.encode_batch(batch["embodiment"], batch["action"], n_arms=n_arms)
             target = z if wrist_dim == 0 else torch.cat([z, batch["wrist_pose"]], dim=-1)
             rows.append(target.detach().cpu().numpy())
             seen += target.shape[0]
@@ -59,6 +66,7 @@ def fit_normalizer(loader, clip: FrozenActionCLIP, wrist_dim: int, max_samples: 
 def build_policy(
     config: DictConfig, clip: FrozenActionCLIP, normalizer: GaussianNormalizer
 ) -> LatentDiffusionPolicy:
+    n_arms = int(getattr(config, "n_arms", 1))
     obs = ObservationEncoder(
         use_image=bool(config.obs.use_image),
         n_obs_steps=int(config.obs.n_obs_steps),
@@ -66,7 +74,7 @@ def build_policy(
         image_size=int(config.obs.image_size),
         lowdim_dim=int(config.obs.lowdim_dim),
     )
-    action_dim = int(clip.embedding_dim) + int(config.wrist_dim)
+    action_dim = int(clip.embedding_dim) * n_arms + int(config.wrist_dim)
     unet = ConditionalUnet1D(
         input_dim=action_dim,
         global_cond_dim=obs.feature_dim,
@@ -92,4 +100,5 @@ def build_policy(
         embedding_dim=clip.embedding_dim,
         wrist_dim=int(config.wrist_dim),
         horizon=int(config.horizon),
+        n_arms=n_arms,
     )

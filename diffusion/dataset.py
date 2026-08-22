@@ -3,19 +3,16 @@
 Each demonstration is one ``.npz`` with time-aligned arrays. Embodiment is
 declared in ``data/manifest.yaml``, not inside the file.
 
-Required keys
--------------
-action : float32 (T, D_raw)
-    Embodiment-specific end-effector action in physical units. Encoded online
-    by the frozen CLIP encoder (``xhand`` 12-d, ``g2`` 1-d, ``mano`` 189-d).
-wrist_pose : float32 (T, D_wrist)
-    Wrist / EEF pose that is **not** passed through CLIP. Use zeros of shape
-    ``(T, 0)`` only if ``wrist_dim: 0`` in the config.
-
-Optional keys
--------------
+Bimanual transport (``n_arms: 2``)
+---------------------------------
+action : float32 (T, n_arms * D_hand)
+    Concat ``[left_hand, right_hand]``. Each hand is encoded by the frozen CLIP
+    encoder (``xhand`` 12-d / ``g2`` 1-d per side).
+wrist_pose : float32 (T, n_arms * 7)
+    Concat ``[left_arm_cmd, right_arm_cmd]`` — **not** through CLIP.
+lowdim_obs : float32 (T, n_arms * 7)
+    Concat ``[left_arm_qpos, right_arm_qpos]``.
 image : uint8 (T, H, W, 3) or (T, Ncam, H, W, 3)
-lowdim_obs : float32 (T, D_low)
 """
 
 from __future__ import annotations
@@ -30,6 +27,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 
+# Per-hand (single side) dims into frozen CLIP
 RAW_ACTION_DIM = {"mano": 189, "xhand": 12, "g2": 1}
 
 
@@ -75,8 +73,16 @@ def _resolve_glob(root: Path, pattern: str) -> List[Path]:
 def _pad_time(array: np.ndarray, pad_before: int, pad_after: int) -> np.ndarray:
     if pad_before == 0 and pad_after == 0:
         return array
-    before = np.repeat(array[:1], pad_before, axis=0) if pad_before else np.empty((0, *array.shape[1:]), dtype=array.dtype)
-    after = np.repeat(array[-1:], pad_after, axis=0) if pad_after else np.empty((0, *array.shape[1:]), dtype=array.dtype)
+    before = (
+        np.repeat(array[:1], pad_before, axis=0)
+        if pad_before
+        else np.empty((0, *array.shape[1:]), dtype=array.dtype)
+    )
+    after = (
+        np.repeat(array[-1:], pad_after, axis=0)
+        if pad_after
+        else np.empty((0, *array.shape[1:]), dtype=array.dtype)
+    )
     return np.concatenate([before, array, after], axis=0)
 
 
@@ -91,6 +97,7 @@ class EpisodeWindowDataset(Dataset):
         lowdim_dim: int,
         wrist_dim: int,
         image_size: int,
+        n_arms: int = 1,
     ):
         if embodiment not in RAW_ACTION_DIM:
             raise ValueError(f"embodiment must be one of {list(RAW_ACTION_DIM)}, got {embodiment}")
@@ -101,20 +108,27 @@ class EpisodeWindowDataset(Dataset):
         self.lowdim_dim = int(lowdim_dim)
         self.wrist_dim = int(wrist_dim)
         self.image_size = int(image_size)
+        self.n_arms = int(n_arms)
+        if self.n_arms < 1:
+            raise ValueError(f"n_arms must be >= 1, got {self.n_arms}")
         self.episodes: List[Dict[str, Any]] = []
         self.index: List[tuple[int, int]] = []
         pad_before = self.n_obs_steps - 1
         pad_after = self.horizon - 1
-        expected_action = RAW_ACTION_DIM[embodiment]
+        expected_action = RAW_ACTION_DIM[embodiment] * self.n_arms
 
         for file in files:
+            # Skip legacy single-arm split files if a broad glob is used
+            if file.stem.endswith("_left") or file.stem.endswith("_right"):
+                continue
             raw = np.load(file, allow_pickle=False)
             if "action" not in raw.files:
                 raise KeyError(f"{file} missing required key 'action'")
             action = np.asarray(raw["action"], dtype=np.float32)
             if action.ndim != 2 or action.shape[1] != expected_action:
                 raise ValueError(
-                    f"{file} action shape {action.shape}, expected (T, {expected_action}) for {embodiment}"
+                    f"{file} action shape {action.shape}, expected (T, {expected_action}) "
+                    f"for {embodiment} with n_arms={self.n_arms}"
                 )
             t_len = action.shape[0]
             if "wrist_pose" in raw.files:
@@ -134,7 +148,9 @@ class EpisodeWindowDataset(Dataset):
                 if image.ndim == 4:
                     image = image[:, None]
                 if image.ndim != 5:
-                    raise ValueError(f"{file} image must be (T,H,W,3) or (T,Ncam,H,W,3), got {image.shape}")
+                    raise ValueError(
+                        f"{file} image must be (T,H,W,3) or (T,Ncam,H,W,3), got {image.shape}"
+                    )
                 if image.shape[0] != t_len:
                     raise ValueError(f"{file} image T={image.shape[0]} != action T={t_len}")
 
@@ -144,7 +160,9 @@ class EpisodeWindowDataset(Dataset):
                     raise KeyError(f"{file} missing 'lowdim_obs'")
                 lowdim = np.asarray(raw["lowdim_obs"], dtype=np.float32)
                 if lowdim.shape != (t_len, self.lowdim_dim):
-                    raise ValueError(f"{file} lowdim_obs {lowdim.shape}, expected ({t_len}, {self.lowdim_dim})")
+                    raise ValueError(
+                        f"{file} lowdim_obs {lowdim.shape}, expected ({t_len}, {self.lowdim_dim})"
+                    )
 
             episode = {
                 "action": _pad_time(action, pad_before, pad_after),
@@ -177,16 +195,12 @@ class EpisodeWindowDataset(Dataset):
             "embodiment": self.embodiment,
         }
         if "image" in ep:
-            frames = ep["image"][obs_start:obs_end]  # (To, Ncam, H, W, 3)
-            # (To, Ncam, C, H, W)
+            frames = ep["image"][obs_start:obs_end]
             image = np.transpose(frames, (0, 1, 4, 2, 3))
             item["obs_image"] = torch.from_numpy(np.ascontiguousarray(image))
         if "lowdim" in ep:
             item["obs_lowdim"] = torch.from_numpy(ep["lowdim"][obs_start:obs_end].copy())
         return item
-
-
-RAW_ACTION_DIM = {"mano": 189, "xhand": 12, "g2": 1}
 
 
 def _pad_action(action: torch.Tensor, width: int) -> torch.Tensor:
@@ -203,7 +217,6 @@ def _collate(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     width = max(int(row["action"].shape[-1]) for row in batch)
     out: Dict[str, Any] = {
         "embodiment": [row["embodiment"] for row in batch],
-        # Pad hand actions (e.g. 12 vs 1) so xhand/g2 can share a batch; CLIP encode slices by embodiment.
         "action": torch.stack([_pad_action(row["action"], width) for row in batch], dim=0),
         "wrist_pose": torch.stack([row["wrist_pose"] for row in batch], dim=0),
     }
@@ -228,6 +241,7 @@ def build_dataset(spec: DatasetSpec, data_root: Path, config) -> EpisodeWindowDa
         lowdim_dim=int(obs.lowdim_dim),
         wrist_dim=int(config.wrist_dim),
         image_size=int(obs.image_size),
+        n_arms=int(getattr(config, "n_arms", 1)),
     )
 
 

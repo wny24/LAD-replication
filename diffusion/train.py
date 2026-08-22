@@ -53,7 +53,12 @@ def main(config: DictConfig) -> None:
 
     print("Fitting latent+wrist normalizer on a data subset (CLIP frozen)...")
     normalizer = fit_normalizer(
-        loader, clip, int(config.wrist_dim), int(config.training.normalizer_samples), device
+        loader,
+        clip,
+        int(config.wrist_dim),
+        int(config.training.normalizer_samples),
+        device,
+        n_arms=int(getattr(config, "n_arms", 1)),
     )
 
     policy = build_policy(config, clip, normalizer).to(device)

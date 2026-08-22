@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, Union
+from typing import Dict, Iterable, List, Union
 
 import numpy as np
 import torch
@@ -11,7 +11,7 @@ import torch.nn as nn
 from robot_clip.data_loading.dataset import denormalize_data, normalize_data
 from robot_clip.utils import load_checkpoint_file
 
-# Must match diffusion/dataset.py RAW_ACTION_DIM
+# Per-hand dims; must match diffusion/dataset.py RAW_ACTION_DIM
 _RAW_ACTION_DIM = {"mano": 189, "xhand": 12, "g2": 1}
 
 
@@ -20,6 +20,9 @@ class FrozenActionCLIP(nn.Module):
 
     Raw embodiment actions are z-scored with the CLIP training stats, then
     mapped by ``q_i``. Latents are mapped back by ``p_j`` and un-normalized.
+
+    For bimanual (``n_arms=2``), ``action`` is ``[left_hand, right_hand]``;
+    each side is encoded/decoded independently and latents are concatenated.
     """
 
     def __init__(self, checkpoint: str, device: torch.device):
@@ -80,18 +83,55 @@ class FrozenActionCLIP(nn.Module):
         self,
         embodiments: Iterable[str],
         raw_action: torch.Tensor,
+        n_arms: int = 1,
     ) -> torch.Tensor:
-        """Encode a batch that may mix embodiments. ``raw_action`` is (B, H, D_pad).
+        """Encode a batch. ``raw_action`` is (B, H, n_arms*D) possibly zero-padded.
 
-        Trailing dims may be zero-padded (see dataset collate); each sample is
-        sliced to the modality's true ``input_dim`` before the frozen encoder.
+        Returns ``(B, H, n_arms * embedding_dim)``.
         """
         embodiments = list(embodiments)
-        if len(set(embodiments)) == 1:
-            dim = _RAW_ACTION_DIM[embodiments[0]]
-            return self.encode(embodiments[0], raw_action[..., :dim])
-        latents = []
+        n_arms = int(n_arms)
+        latents: List[torch.Tensor] = []
         for index, name in enumerate(embodiments):
             dim = _RAW_ACTION_DIM[name]
-            latents.append(self.encode(name, raw_action[index, ..., :dim]))
+            need = dim * n_arms
+            hand = raw_action[index, ..., :need]
+            if n_arms == 1:
+                latents.append(self.encode(name, hand))
+                continue
+            # (H, n_arms, D_hand) → encode each arm → (H, n_arms*Dz)
+            parts = hand.reshape(*hand.shape[:-1], n_arms, dim)
+            z_arms = [self.encode(name, parts[..., arm, :]) for arm in range(n_arms)]
+            latents.append(torch.cat(z_arms, dim=-1))
         return torch.stack(latents, dim=0)
+
+    def decode_batch(
+        self,
+        embodiments: Iterable[str],
+        latent: torch.Tensor,
+        n_arms: int = 1,
+    ) -> torch.Tensor:
+        """Decode ``(B, H, n_arms*Dz)`` → physical ``(B, H, n_arms*D_hand)``.
+
+        Mixed-embodiment batches are zero-padded on the hand dim to a common width.
+        """
+        embodiments = list(embodiments)
+        n_arms = int(n_arms)
+        actions: List[torch.Tensor] = []
+        for index, name in enumerate(embodiments):
+            z = latent[index]
+            if n_arms == 1:
+                actions.append(self.decode(name, z[..., : self.embedding_dim]))
+                continue
+            z_parts = z.reshape(*z.shape[:-1], n_arms, self.embedding_dim)
+            hands = [self.decode(name, z_parts[..., arm, :]) for arm in range(n_arms)]
+            actions.append(torch.cat(hands, dim=-1))
+        width = max(int(a.shape[-1]) for a in actions)
+        padded = []
+        for a in actions:
+            if a.shape[-1] == width:
+                padded.append(a)
+            else:
+                pad = torch.zeros(*a.shape[:-1], width - a.shape[-1], dtype=a.dtype, device=a.device)
+                padded.append(torch.cat([a, pad], dim=-1))
+        return torch.stack(padded, dim=0)

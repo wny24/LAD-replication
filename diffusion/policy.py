@@ -26,6 +26,7 @@ class LatentDiffusionPolicy(nn.Module):
         embedding_dim: int,
         wrist_dim: int,
         horizon: int,
+        n_arms: int = 1,
     ):
         super().__init__()
         self.clip = clip
@@ -36,15 +37,17 @@ class LatentDiffusionPolicy(nn.Module):
         self.embedding_dim = int(embedding_dim)
         self.wrist_dim = int(wrist_dim)
         self.horizon = int(horizon)
-        self.action_dim = self.embedding_dim + self.wrist_dim
+        self.n_arms = int(n_arms)
+        self.latent_dim = self.embedding_dim * self.n_arms
+        self.action_dim = self.latent_dim + self.wrist_dim
 
     def encode_obs(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         return self.obs_encoder(image=batch.get("obs_image"), lowdim=batch.get("obs_lowdim"))
 
     def latent_target(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """CLIP-encode raw eef action and concat non-latent wrist pose. (B, H, Dz+Dw)."""
+        """CLIP-encode hand action(s) and concat non-latent wrist. (B, H, n_arms*Dz+Dw)."""
         embodiments: List[str] = batch["embodiment"]
-        z = self.clip.encode_batch(embodiments, batch["action"])
+        z = self.clip.encode_batch(embodiments, batch["action"], n_arms=self.n_arms)
         if self.wrist_dim == 0:
             return z
         wrist = batch["wrist_pose"]
@@ -74,10 +77,10 @@ class LatentDiffusionPolicy(nn.Module):
         use_ddim: bool = True,
         eta: float = 0.0,
     ) -> Dict[str, torch.Tensor]:
-        """Denoise a latent action sequence, then decode with the frozen CLIP decoder.
+        """Denoise, then decode each arm with the frozen CLIP decoder.
 
-        Returns physical-unit ``action`` (B, H, D_raw), ``wrist_pose`` (B, H, Dw),
-        and ``latent`` (B, H, Dz).
+        Returns physical-unit ``action`` (B, H, n_arms*D_hand), ``wrist_pose``
+        (B, H, Dw), and ``latent`` (B, H, n_arms*Dz).
         """
         self.eval()
         cond = self.encode_obs(batch)
@@ -95,18 +98,18 @@ class LatentDiffusionPolicy(nn.Module):
                 sample = self.scheduler.ddim_step(pred, int(t.item()), prev, sample, eta=eta)
         else:
             for t in range(self.scheduler.num_train_timesteps - 1, -1, -1):
-                pred = self.unet(sample, torch.full((b,), t, device=device, dtype=torch.long), global_cond=cond)
+                pred = self.unet(
+                    sample,
+                    torch.full((b,), t, device=device, dtype=torch.long),
+                    global_cond=cond,
+                )
                 sample = self.scheduler.step(pred, t, sample)
 
         denorm = self.normalizer.denormalize(sample)
-        latent = denorm[..., : self.embedding_dim]
-        wrist = denorm[..., self.embedding_dim :]
+        latent = denorm[..., : self.latent_dim]
+        wrist = denorm[..., self.latent_dim :]
         embodiments: List[str] = batch["embodiment"]
-        if len(set(embodiments)) != 1:
-            actions = [self.clip.decode(name, latent[i]) for i, name in enumerate(embodiments)]
-            action = torch.stack(actions, dim=0)
-        else:
-            action = self.clip.decode(embodiments[0], latent)
+        action = self.clip.decode_batch(embodiments, latent, n_arms=self.n_arms)
         return {"action": action, "wrist_pose": wrist, "latent": latent}
 
 
